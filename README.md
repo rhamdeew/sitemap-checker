@@ -7,7 +7,7 @@ A high-performance Go tool to validate all URLs in a website's sitemap.xml, with
 - **Complete sitemap validation**: Process both sitemap indexes and individual sitemaps
 - **Recursive processing**: Handles nested sitemaps within sitemap indexes
 - **Redirect detection**: Identifies and logs all redirects, capturing the redirect destination
-- **Parallel processing**: Efficiently checks multiple URLs concurrently
+- **Parallel processing**: Efficiently checks multiple URLs concurrently with configurable parallelism
 - **Rate limiting**: Configurable delays between requests to avoid overwhelming servers
 - **Detailed logging**: Comprehensive logs with timestamps, status codes, and errors
 - **Progress visualization**: Real-time progress bar to monitor validation status
@@ -44,6 +44,12 @@ go install
 
 # Specify a custom directory for log files
 ./sitemap_checker -u https://example.com/sitemap.xml -logdir ./logs
+
+# Run with 10 parallel requests
+./sitemap_checker -u https://example.com/sitemap.xml -c 10
+
+# Combine options
+./sitemap_checker -u https://example.com/sitemap.xml -t 200 -c 5 -logdir ./logs
 ```
 
 ### Command Line Options
@@ -53,6 +59,7 @@ go install
 | `-u`     | URL of the sitemap.xml file (required)         | None (Required)      |
 | `-t`     | Timeout in milliseconds between check requests | 1000 (1 second)      |
 | `-logdir`| Directory to store log files                   | Current directory    |
+| `-c`     | Number of parallel requests to execute         | 1 (Sequential)       |
 
 ## Log Files
 
@@ -68,23 +75,25 @@ Example: `example-com-2025-03-14-14-30-45.log`
 Each log file contains:
 
 1. Header with sitemap URL and start time
-2. Full list of problematic URLs with details:
+2. Concurrency configuration (number of parallel requests)
+3. Full list of problematic URLs with details:
    - Invalid status codes (non-2xx)
    - Connection errors
    - **Redirects with their destination URLs**
-3. Summary statistics
-4. End timestamp
+4. Summary statistics
+5. End timestamp
 
 ## How It Works
 
 1. **Sitemap Retrieval**: The tool fetches and parses the provided sitemap URL
 2. **Recursive Processing**: For sitemap indexes, it processes all child sitemaps
 3. **URL Extraction**: All URLs are extracted from the sitemap(s)
-4. **Validation Process**:
+4. **Parallel Validation Process**:
    - Makes a HEAD request for each URL (more efficient)
    - Falls back to GET if HEAD is not supported (status 405)
    - Records status codes, errors, and redirect locations
    - **Does not follow redirects** - instead flags them as issues
+   - Controls concurrency using a semaphore pattern
 5. **Reporting**: Provides a detailed summary of problematic URLs
 
 ## Redirect Handling
@@ -116,11 +125,17 @@ Summary: Found 37 problematic URLs out of 845 total URLs
 Redirects: 12 URLs
 ```
 
-## Performance Considerations
+## Performance Tuning
 
 - The default timeout between requests is 1000ms (1 second)
-- For large websites, consider increasing the timeout (`-t` flag) to avoid overloading the server
-- The tool implements a progress bar that updates every 100ms to avoid terminal flooding
+- The default concurrency is 1 (sequential requests)
+- For optimal performance:
+  - Increase concurrency (`-c` flag) to check multiple URLs in parallel
+  - Adjust the timeout (`-t` flag) based on the server's capacity
+- Recommended starting values:
+  - Small sites: `-c 5 -t 500`
+  - Medium sites: `-c 10 -t 1000`
+  - Large sites: `-c 20 -t 2000`
 
 ## License
 
