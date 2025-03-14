@@ -13,7 +13,7 @@ import (
 
 // SitemapIndex represents a sitemap index file
 type SitemapIndex struct {
-	XMLName xml.Name `xml:"sitemapindex"`
+	XMLName  xml.Name  `xml:"sitemapindex"`
 	Sitemaps []Sitemap `xml:"sitemap"`
 }
 
@@ -40,36 +40,94 @@ type Result struct {
 	Error  error
 }
 
+// ProgressBar represents a simple progress bar
+type ProgressBar struct {
+	total      int
+	current    int
+	mu         sync.Mutex
+	lastUpdate time.Time
+}
+
+// NewProgressBar creates a new progress bar
+func NewProgressBar(total int) *ProgressBar {
+	return &ProgressBar{
+		total:      total,
+		current:    0,
+		lastUpdate: time.Now(),
+	}
+}
+
+// Increment increases the progress by one and updates the display if needed
+func (pb *ProgressBar) Increment() {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	
+	pb.current++
+	
+	// Only update the progress bar every 100ms to avoid flooding the terminal
+	if time.Since(pb.lastUpdate) > 100*time.Millisecond || pb.current == pb.total {
+		pb.update()
+		pb.lastUpdate = time.Now()
+	}
+}
+
+// update displays the current progress
+func (pb *ProgressBar) update() {
+	width := 50
+	percentage := float64(pb.current) / float64(pb.total)
+	completed := int(float64(width) * percentage)
+	
+	fmt.Printf("\r[")
+	for i := 0; i < width; i++ {
+		if i < completed {
+			fmt.Print("=")
+		} else if i == completed {
+			fmt.Print(">")
+		} else {
+			fmt.Print(" ")
+		}
+	}
+	
+	fmt.Printf("] %d/%d (%d%%)", pb.current, pb.total, int(percentage*100))
+	
+	// Print newline when complete
+	if pb.current == pb.total {
+		fmt.Println()
+	}
+}
+
 func main() {
 	// Define command-line flags
 	sitemapURL := flag.String("u", "", "URL of the sitemap.xml file (required)")
 	timeout := flag.Int("t", 1000, "Timeout in milliseconds between check requests")
 	flag.Parse()
-
+	
 	// Check if sitemap URL is provided
 	if *sitemapURL == "" {
 		fmt.Println("Error: Sitemap URL is required. Use -u flag to specify the URL.")
 		flag.Usage()
 		os.Exit(1)
 	}
-
+	
 	// Create HTTP client
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
-
+	
 	// Retrieve and process the sitemap
+	fmt.Println("Retrieving URLs from sitemap...")
 	allURLs, err := retrieveAllURLs(client, *sitemapURL)
 	if err != nil {
 		fmt.Printf("Error retrieving URLs: %v\n", err)
 		os.Exit(1)
 	}
-
+	
 	fmt.Printf("Found %d URLs to check\n", len(allURLs))
-
-	// Check all URLs
+	fmt.Println("Checking URLs...")
+	
+	// Check all URLs with progress bar
 	results := checkURLs(client, allURLs, *timeout)
-
+	
 	// Print problematic URLs
 	problematicCount := 0
 	for _, result := range results {
@@ -82,7 +140,7 @@ func main() {
 			}
 		}
 	}
-
+	
 	fmt.Printf("\nSummary: Found %d problematic URLs out of %d total URLs\n", problematicCount, len(results))
 }
 
@@ -92,12 +150,11 @@ func retrieveAllURLs(client *http.Client, sitemapURL string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error fetching sitemap: %w", err)
 	}
-
+	
 	// Try to parse as a sitemap index first
 	var sitemapIndex SitemapIndex
 	if err := xml.Unmarshal(body, &sitemapIndex); err == nil && len(sitemapIndex.Sitemaps) > 0 {
 		fmt.Printf("Found sitemap index with %d sitemaps\n", len(sitemapIndex.Sitemaps))
-		
 		var allURLs []string
 		for _, sitemap := range sitemapIndex.Sitemaps {
 			fmt.Printf("Processing referenced sitemap: %s\n", sitemap.Loc)
@@ -110,18 +167,17 @@ func retrieveAllURLs(client *http.Client, sitemapURL string) ([]string, error) {
 		}
 		return allURLs, nil
 	}
-
+	
 	// If not a sitemap index, try to parse as a regular sitemap
 	var urlSet URLSet
 	if err := xml.Unmarshal(body, &urlSet); err != nil {
 		return nil, fmt.Errorf("error parsing sitemap: %w", err)
 	}
-
+	
 	var urls []string
 	for _, u := range urlSet.URLs {
 		urls = append(urls, u.Loc)
 	}
-
 	return urls, nil
 }
 
@@ -132,11 +188,11 @@ func fetchURL(client *http.Client, url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
+	
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("received non-200 status code: %d", resp.StatusCode)
 	}
-
+	
 	return io.ReadAll(resp.Body)
 }
 
@@ -145,7 +201,10 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int) []Result {
 	results := make([]Result, 0, len(urls))
 	resultsChan := make(chan Result, len(urls))
 	var wg sync.WaitGroup
-
+	
+	// Create progress bar
+	progressBar := NewProgressBar(len(urls))
+	
 	// Process URLs with rate limiting
 	for _, url := range urls {
 		wg.Add(1)
@@ -156,15 +215,16 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int) []Result {
 			req, err := http.NewRequest("HEAD", url, nil)
 			if err != nil {
 				resultsChan <- Result{URL: url, Error: err}
+				progressBar.Increment()
 				return
 			}
 			
 			// Set a user agent to avoid being blocked
 			req.Header.Set("User-Agent", "SitemapChecker/1.0")
-			
 			resp, err := client.Do(req)
 			if err != nil {
 				resultsChan <- Result{URL: url, Error: err}
+				progressBar.Increment()
 				return
 			}
 			defer resp.Body.Close()
@@ -174,37 +234,38 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int) []Result {
 			// If HEAD request returned 405 Method Not Allowed, try GET instead
 			if resp.StatusCode == http.StatusMethodNotAllowed {
 				time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
-				
 				getReq, err := http.NewRequest("GET", url, nil)
 				if err != nil {
+					progressBar.Increment()
 					return
 				}
 				getReq.Header.Set("User-Agent", "SitemapChecker/1.0")
-				
 				getResp, err := client.Do(getReq)
 				if err != nil {
+					progressBar.Increment()
 					return
 				}
 				defer getResp.Body.Close()
-				
 				resultsChan <- Result{URL: url, Status: getResp.StatusCode}
 			}
+			
+			progressBar.Increment()
 		}(url)
 		
 		// Sleep to respect the timeout between requests
 		time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
 	}
-
+	
 	// Wait for all goroutines to complete
 	go func() {
 		wg.Wait()
 		close(resultsChan)
 	}()
-
+	
 	// Collect results
 	for result := range resultsChan {
 		results = append(results, result)
 	}
-
+	
 	return results
 }
