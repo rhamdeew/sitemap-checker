@@ -184,6 +184,7 @@ func main() {
 	sitemapURL := flag.String("u", "", "URL of the sitemap.xml file (required)")
 	timeout := flag.Int("t", 1000, "Timeout in milliseconds between check requests")
 	logDir := flag.String("logdir", "", "Directory to store log files (default: current directory)")
+	concurrency := flag.Int("c", 1, "Number of parallel requests to execute simultaneously")
 	
 	flag.Parse()
 	
@@ -220,6 +221,7 @@ func main() {
 			logger.Log(fmt.Sprintf("Sitemap check for: %s", parsedURL.Host))
 		}
 		logger.Log(fmt.Sprintf("Started at: %s", time.Now().Format(time.RFC3339)))
+		logger.Log(fmt.Sprintf("Concurrency: %d parallel requests", *concurrency))
 		logger.Log("-------------------------------------------")
 	}
 	
@@ -251,7 +253,7 @@ func main() {
 	fmt.Println("Checking URLs...")
 	
 	// Check all URLs with progress bar and logger
-	results := checkURLs(client, allURLs, *timeout, logger)
+	results := checkURLs(client, allURLs, *timeout, *concurrency, logger)
 	
 	// Print problematic URLs
 	problematicCount := 0
@@ -348,19 +350,28 @@ func fetchURL(client *http.Client, url string) ([]byte, error) {
 }
 
 // checkURLs checks all URLs and returns their status
-func checkURLs(client *http.Client, urls []string, timeoutMs int, logger *Logger) []Result {
+func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency int, logger *Logger) []Result {
 	results := make([]Result, 0, len(urls))
 	resultsChan := make(chan Result, len(urls))
-	var wg sync.WaitGroup
+	
+	// Create semaphore channel for limiting concurrency
+	sem := make(chan struct{}, concurrency)
 	
 	// Create progress bar
 	progressBar := NewProgressBar(len(urls))
 	
-	// Process URLs with rate limiting
+	var wg sync.WaitGroup
+	
+	// Process URLs with rate limiting and concurrency control
 	for _, url := range urls {
 		wg.Add(1)
+		
+		// Acquire semaphore (blocks if we've reached max concurrency)
+		sem <- struct{}{}
+		
 		go func(url string) {
 			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore when done
 			
 			// Create a request to check headers only
 			req, err := http.NewRequest("HEAD", url, nil)
@@ -505,7 +516,10 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, logger *Logger
 		}(url)
 		
 		// Sleep to respect the timeout between requests
-		time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
+		// Only if not running at max concurrency (which naturally spaces out requests)
+		if len(sem) < concurrency {
+			time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
+		}
 	}
 	
 	// Wait for all goroutines to complete
