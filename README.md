@@ -1,5 +1,11 @@
 # Sitemap Checker
 
+![CI/CD Status](https://github.com/rhamdeew/sitemap-checker/actions/workflows/release.yml/badge.svg)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/releases/latest)
+[![GitHub license](https://img.shields.io/github/license/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/blob/main/LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rhamdeew/sitemap-checker)](https://goreportcard.com/report/github.com/rhamdeew/sitemap-checker)
+[![GitHub stars](https://img.shields.io/github/stars/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/stargazers)
+
 A high-performance Go tool to validate all URLs in a website's sitemap.xml, with comprehensive error detection and redirect validation.
 
 ## Features
@@ -48,8 +54,11 @@ go install
 # Run with 10 parallel requests
 ./sitemap_checker -u https://example.com/sitemap.xml -c 10
 
+# Skip SSL certificate validation
+./sitemap_checker -u https://example.com/sitemap.xml -k
+
 # Combine options
-./sitemap_checker -u https://example.com/sitemap.xml -t 200 -c 5 -logdir ./logs
+./sitemap_checker -u https://example.com/sitemap.xml -t 200 -c 5 -logdir ./logs -k
 ```
 
 ### Command Line Options
@@ -60,6 +69,7 @@ go install
 | `-t`     | Timeout in milliseconds between check requests | 1000 (1 second)      |
 | `-logdir`| Directory to store log files                   | Current directory    |
 | `-c`     | Number of parallel requests to execute         | 1 (Sequential)       |
+| `-k`     | Skip SSL certificate validation                | false                |
 
 ## Log Files
 
