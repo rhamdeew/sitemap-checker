@@ -118,7 +118,7 @@ func createLogFilename(sitemapURL string) (string, error) {
 	hostname := parsedURL.Host
 
 	// Strip port number if present
-	if colonIndex := indexOf(hostname, ":"); colonIndex != -1 {
+	if colonIndex := strings.Index(hostname, ":"); colonIndex != -1 {
 		hostname = hostname[:colonIndex]
 	}
 
@@ -133,16 +133,6 @@ func createLogFilename(sitemapURL string) (string, error) {
 	// Create filename
 	filename := fmt.Sprintf("%s-%s-%s.log", hostname, dateStr, timeStr)
 	return filename, nil
-}
-
-// indexOf returns the index of the first instance of substr in s, or -1 if not found
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
 
 // Increment increases the progress by one and updates the display if needed
@@ -197,6 +187,12 @@ func main() {
 	if *sitemapURL == "" {
 		fmt.Println("Error: Sitemap URL is required. Use -u flag to specify the URL.")
 		flag.Usage()
+		osExit(1)
+	}
+
+	// Check concurrency is valid; a value below 1 would deadlock the semaphore
+	if *concurrency < 1 {
+		fmt.Println("Error: Concurrency (-c) must be at least 1.")
 		osExit(1)
 	}
 
@@ -307,6 +303,24 @@ func main() {
 
 // retrieveAllURLs retrieves all URLs from a sitemap, including referenced sitemaps
 func retrieveAllURLs(client *http.Client, sitemapURL string, insecure bool) ([]string, error) {
+	return retrieveURLsRecursive(client, sitemapURL, insecure, make(map[string]bool), 0)
+}
+
+// maxSitemapDepth bounds how deep sitemap index references may nest, guarding
+// against unbounded recursion from cyclic or self-referencing sitemap indexes.
+const maxSitemapDepth = 10
+
+// retrieveURLsRecursive fetches a sitemap (or sitemap index) and recurses into
+// referenced sitemaps, guarding against cycles and excessive nesting depth.
+func retrieveURLsRecursive(client *http.Client, sitemapURL string, insecure bool, visited map[string]bool, depth int) ([]string, error) {
+	if depth > maxSitemapDepth {
+		return nil, fmt.Errorf("exceeded maximum sitemap nesting depth (%d) at %s", maxSitemapDepth, sitemapURL)
+	}
+	if visited[sitemapURL] {
+		return nil, fmt.Errorf("cyclic sitemap reference detected at %s", sitemapURL)
+	}
+	visited[sitemapURL] = true
+
 	// Create a temporary client that follows redirects for sitemap retrieval
 	transport := &http.Transport{}
 	if insecure {
@@ -331,7 +345,7 @@ func retrieveAllURLs(client *http.Client, sitemapURL string, insecure bool) ([]s
 		var allURLs []string
 		for _, sitemap := range sitemapIndex.Sitemaps {
 			fmt.Printf("Processing referenced sitemap: %s\n", sitemap.Loc)
-			urls, err := retrieveAllURLs(client, sitemap.Loc, insecure)
+			urls, err := retrieveURLsRecursive(client, sitemap.Loc, insecure, visited, depth+1)
 			if err != nil {
 				fmt.Printf("Warning: Error processing referenced sitemap %s: %v\n", sitemap.Loc, err)
 				continue
@@ -459,21 +473,20 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 				if logger != nil {
 					logger.Log(fmt.Sprintf("REDIRECT: %s -> %s (Status: %d)", url, redirectURL, resp.StatusCode))
 				}
-			} else if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				// Log bad status immediately
-				if logger != nil {
-					logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, resp.StatusCode))
-				}
 			}
 
-			resultsChan <- result
-
-			// If HEAD request returned 405 Method Not Allowed, try GET instead
+			// If HEAD request returned 405 Method Not Allowed, retry with GET
+			// and report only the GET outcome, so each URL contributes exactly
+			// one result instead of counting the HEAD 405 separately.
 			if resp.StatusCode == http.StatusMethodNotAllowed {
 				time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
 
 				getReq, err := http.NewRequest("GET", url, nil)
 				if err != nil {
+					resultsChan <- result
+					if logger != nil {
+						logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, resp.StatusCode))
+					}
 					progressBar.Increment()
 					return
 				}
@@ -482,28 +495,12 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 				getResp, err := client.Do(getReq)
 				if err != nil {
-					// Check if it's a redirect error
-					if getResp != nil && (getResp.StatusCode >= 300 && getResp.StatusCode < 400) {
-						// It's a redirect
-						redirectURL := getResp.Header.Get("Location")
-						getResult := Result{
-							URL:         url,
-							Status:      getResp.StatusCode,
-							IsRedirect:  true,
-							RedirectURL: redirectURL,
-						}
-						resultsChan <- getResult
+					// It's another error
+					getResult := Result{URL: url, Error: err}
+					resultsChan <- getResult
 
-						// Log redirect immediately
-						if logger != nil {
-							logger.Log(fmt.Sprintf("REDIRECT (GET after 405): %s -> %s (Status: %d)",
-								url, redirectURL, getResp.StatusCode))
-						}
-					} else {
-						// It's another error
-						if logger != nil {
-							logger.Log(fmt.Sprintf("ERROR (GET after 405): %s - %v", url, err))
-						}
+					if logger != nil {
+						logger.Log(fmt.Sprintf("ERROR (GET after 405): %s - %v", url, err))
 					}
 
 					progressBar.Increment()
@@ -532,16 +529,23 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 				}
 
 				resultsChan <- getResult
+				progressBar.Increment()
+				return
 			}
 
+			if result.Status < 200 || result.Status >= 300 {
+				if !result.IsRedirect && logger != nil {
+					// Log bad status immediately
+					logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, result.Status))
+				}
+			}
+
+			resultsChan <- result
 			progressBar.Increment()
 		}(url)
 
-		// Sleep to respect the timeout between requests
-		// Only if not running at max concurrency (which naturally spaces out requests)
-		if len(sem) < concurrency {
-			time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
-		}
+		// Sleep to respect the timeout between launching requests
+		time.Sleep(time.Duration(timeoutMs) * time.Millisecond)
 	}
 
 	// Wait for all goroutines to complete
