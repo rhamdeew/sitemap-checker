@@ -3,7 +3,7 @@
 ![CI/CD Status](https://github.com/rhamdeew/sitemap-checker/actions/workflows/release.yml/badge.svg)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/releases/latest)
 [![GitHub license](https://img.shields.io/github/license/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/blob/main/LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/rhamdeew/sitemap-checker)](https://goreportcard.com/report/github.com/rhamdeew/sitemap-checker)
+[![Lint](https://github.com/rhamdeew/sitemap-checker/actions/workflows/lint.yml/badge.svg)](https://github.com/rhamdeew/sitemap-checker/actions/workflows/lint.yml)
 [![GitHub stars](https://img.shields.io/github/stars/rhamdeew/sitemap-checker)](https://github.com/rhamdeew/sitemap-checker/stargazers)
 
 A high-performance Go tool to validate all URLs in a website's sitemap.xml, with comprehensive error detection and redirect validation.

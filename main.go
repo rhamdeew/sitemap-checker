@@ -213,20 +213,20 @@ func main() {
 	if err != nil {
 		fmt.Printf("Warning: Failed to create logger: %v. Proceeding without logging.\n", err)
 	} else {
-		defer logger.Close()
+		defer func() { _ = logger.Close() }()
 		fmt.Printf("Logging to: %s\n", logFilename)
 
 		// Write header to log file
 		parsedURL, err := url.Parse(*sitemapURL)
 		if err == nil {
-			logger.Log(fmt.Sprintf("Sitemap check for: %s", parsedURL.Host))
+			_ = logger.Log(fmt.Sprintf("Sitemap check for: %s", parsedURL.Host))
 		}
-		logger.Log(fmt.Sprintf("Started at: %s", time.Now().Format(time.RFC3339)))
-		logger.Log(fmt.Sprintf("Concurrency: %d parallel requests", *concurrency))
+		_ = logger.Log(fmt.Sprintf("Started at: %s", time.Now().Format(time.RFC3339)))
+		_ = logger.Log(fmt.Sprintf("Concurrency: %d parallel requests", *concurrency))
 		if *insecure {
-			logger.Log("SSL certificate validation: DISABLED")
+			_ = logger.Log("SSL certificate validation: DISABLED")
 		}
-		logger.Log("-------------------------------------------")
+		_ = logger.Log("-------------------------------------------")
 	}
 
 	// Create HTTP transport with optional insecure SSL
@@ -252,14 +252,14 @@ func main() {
 	if err != nil {
 		fmt.Printf("Error retrieving URLs: %v\n", err)
 		if logger != nil {
-			logger.Log(fmt.Sprintf("Error retrieving URLs: %v", err))
+			_ = logger.Log(fmt.Sprintf("Error retrieving URLs: %v", err))
 		}
 		osExit(1)
 	}
 
 	fmt.Printf("Found %d URLs to check\n", len(allURLs))
 	if logger != nil {
-		logger.Log(fmt.Sprintf("Found %d URLs to check", len(allURLs)))
+		_ = logger.Log(fmt.Sprintf("Found %d URLs to check", len(allURLs)))
 	}
 
 	fmt.Println("Checking URLs...")
@@ -294,10 +294,10 @@ func main() {
 	fmt.Println(redirectMsg)
 
 	if logger != nil {
-		logger.Log("-------------------------------------------")
-		logger.Log(summaryMsg)
-		logger.Log(redirectMsg)
-		logger.Log(fmt.Sprintf("Finished at: %s", time.Now().Format(time.RFC3339)))
+		_ = logger.Log("-------------------------------------------")
+		_ = logger.Log(summaryMsg)
+		_ = logger.Log(redirectMsg)
+		_ = logger.Log(fmt.Sprintf("Finished at: %s", time.Now().Format(time.RFC3339)))
 	}
 }
 
@@ -376,7 +376,7 @@ func fetchURL(client *http.Client, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("received non-200 status code: %d", resp.StatusCode)
@@ -417,7 +417,7 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 				// Log error immediately
 				if logger != nil {
-					logger.Log(fmt.Sprintf("ERROR: %s - %v", url, err))
+					_ = logger.Log(fmt.Sprintf("ERROR: %s - %v", url, err))
 				}
 
 				progressBar.Increment()
@@ -443,7 +443,7 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 					// Log redirect immediately
 					if logger != nil {
-						logger.Log(fmt.Sprintf("REDIRECT: %s -> %s (Status: %d)", url, redirectURL, resp.StatusCode))
+						_ = logger.Log(fmt.Sprintf("REDIRECT: %s -> %s (Status: %d)", url, redirectURL, resp.StatusCode))
 					}
 				} else {
 					// It's another error
@@ -452,14 +452,14 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 					// Log error immediately
 					if logger != nil {
-						logger.Log(fmt.Sprintf("ERROR: %s - %v", url, err))
+						_ = logger.Log(fmt.Sprintf("ERROR: %s - %v", url, err))
 					}
 				}
 
 				progressBar.Increment()
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			result := Result{URL: url, Status: resp.StatusCode}
 
@@ -471,7 +471,7 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 				// Log redirect immediately
 				if logger != nil {
-					logger.Log(fmt.Sprintf("REDIRECT: %s -> %s (Status: %d)", url, redirectURL, resp.StatusCode))
+					_ = logger.Log(fmt.Sprintf("REDIRECT: %s -> %s (Status: %d)", url, redirectURL, resp.StatusCode))
 				}
 			}
 
@@ -485,7 +485,7 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 				if err != nil {
 					resultsChan <- result
 					if logger != nil {
-						logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, resp.StatusCode))
+						_ = logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, resp.StatusCode))
 					}
 					progressBar.Increment()
 					return
@@ -500,13 +500,13 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 					resultsChan <- getResult
 
 					if logger != nil {
-						logger.Log(fmt.Sprintf("ERROR (GET after 405): %s - %v", url, err))
+						_ = logger.Log(fmt.Sprintf("ERROR (GET after 405): %s - %v", url, err))
 					}
 
 					progressBar.Increment()
 					return
 				}
-				defer getResp.Body.Close()
+				defer func() { _ = getResp.Body.Close() }()
 
 				getResult := Result{URL: url, Status: getResp.StatusCode}
 
@@ -518,13 +518,13 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 
 					// Log redirect immediately
 					if logger != nil {
-						logger.Log(fmt.Sprintf("REDIRECT (GET after 405): %s -> %s (Status: %d)",
+						_ = logger.Log(fmt.Sprintf("REDIRECT (GET after 405): %s -> %s (Status: %d)",
 							url, redirectURL, getResp.StatusCode))
 					}
 				} else if getResp.StatusCode < 200 || getResp.StatusCode >= 300 {
 					// Log bad status immediately
 					if logger != nil {
-						logger.Log(fmt.Sprintf("INVALID STATUS (GET after 405): %s - %d", url, getResp.StatusCode))
+						_ = logger.Log(fmt.Sprintf("INVALID STATUS (GET after 405): %s - %d", url, getResp.StatusCode))
 					}
 				}
 
@@ -536,7 +536,7 @@ func checkURLs(client *http.Client, urls []string, timeoutMs int, concurrency in
 			if result.Status < 200 || result.Status >= 300 {
 				if !result.IsRedirect && logger != nil {
 					// Log bad status immediately
-					logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, result.Status))
+					_ = logger.Log(fmt.Sprintf("INVALID STATUS: %s - %d", url, result.Status))
 				}
 			}
 

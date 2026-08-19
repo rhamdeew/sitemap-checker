@@ -88,7 +88,7 @@ func TestLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a test log file path
 	logFile := filepath.Join(tmpDir, "test.log")
@@ -245,14 +245,14 @@ func TestCheckURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	logFile := filepath.Join(tmpDir, "test.log")
 	logger, err := NewLogger(logFile)
 	if err != nil {
 		t.Fatalf("NewLogger() error = %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// Create test URL responses
 	mockResponses := map[string]mockResponse{

@@ -19,7 +19,7 @@ func TestMainIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a sitemap file
 	sitemapXML := `<?xml version="1.0" encoding="UTF-8"?>
@@ -36,10 +36,10 @@ func TestMainIntegration(t *testing.T) {
 		case "/sitemap.xml":
 			w.Header().Set("Content-Type", "application/xml")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, sitemapXML)
+			_, _ = fmt.Fprint(w, sitemapXML)
 		case "/page1", "/page2":
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintf(w, "Content of %s", r.URL.Path)
+			_, _ = fmt.Fprintf(w, "Content of %s", r.URL.Path)
 		case "/redirect":
 			w.Header().Set("Location", "/page1")
 			w.WriteHeader(http.StatusMovedPermanently)
@@ -52,7 +52,7 @@ func TestMainIntegration(t *testing.T) {
 	defer server.Close()
 
 	// Replace the URL host in the sitemap with the test server's host
-	sitemapXML = strings.Replace(sitemapXML, "<loc>/", fmt.Sprintf("<loc>%s/", server.URL), -1)
+	sitemapXML = strings.ReplaceAll(sitemapXML, "<loc>/", fmt.Sprintf("<loc>%s/", server.URL))
 
 	// Create a sitemap file on the test server
 	sitemapURL := fmt.Sprintf("%s/sitemap.xml", server.URL)
@@ -88,9 +88,9 @@ func TestMainIntegration(t *testing.T) {
 	}
 
 	// Close the pipe and read the output
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	output := buf.String()
 
 	// Check if the output contains expected information
